@@ -1,0 +1,53 @@
+name: Sync upstream lunatv image
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 每天 UTC 03:00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set lowercase repository owner
+        id: owner
+        run: |
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure skopeo & jq installed
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo jq
+
+      - name: Sync latest tag
+        run: |
+          docker pull ghcr.io/szemeng76/lunatv:latest
+          docker tag ghcr.io/szemeng76/lunatv:latest \
+            ghcr.io/${{ steps.owner.outputs.owner }}/lunatv:latest
+          docker push ghcr.io/${{ steps.owner.outputs.owner }}/lunatv:latest
+
+      - name: Sync version tags (v*)
+        run: |
+          set -e
+          TAGS=$(skopeo list-tags docker://ghcr.io/szemeng76/lunatv \
+            | jq -r '.Tags[]' | grep '^v' || true)
+
+          for tag in $TAGS; do
+            echo "Syncing tag: $tag"
+            docker pull ghcr.io/szemeng76/lunatv:$tag
+            docker tag ghcr.io/szemeng76/lunatv:$tag \
+              ghcr.io/${{ steps.owner.outputs.owner }}/lunatv:$tag
+            docker push ghcr.io/${{ steps.owner.outputs.owner }}/lunatv:$tag
+          done
